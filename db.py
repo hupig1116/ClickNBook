@@ -31,9 +31,10 @@ class Booking:
     end_time: time
     visitor_name: str
     visitor_email: str
+    short_name: str
     purpose: Optional[str]
+
     created_at: datetime
-    user_email: Optional[str] = None
 
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -98,7 +99,6 @@ def _create_tables():
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             room_id       INTEGER NOT NULL,
             short_name    TEXT,
-            user_email    TEXT,
             booking_date  TEXT NOT NULL,
             start_time    TEXT NOT NULL,
             end_time      TEXT NOT NULL,
@@ -144,6 +144,7 @@ def _create_tables():
 
 def _seed_table():
     teachers = [
+        ("ADMIN", "Administrator", "admin@example.com"),
         ("PSM", "Poon Sin Man", "psm@lkpfc.edu.hk"),
         ("YWY", "Yau Wing Yiu", "ywy@lkpfc.edu.hk"),
         ("YHN", "Yue Hin Nang", "yhn@lkpfc.edu.hk"),
@@ -231,9 +232,6 @@ def verify_login(short_name: str, password: str) -> Optional[Teacher]:
     return Teacher(short_name=t["short_name"], full_name=t["full_name"], email=t["email"])
 
 ### Booking and Room functions ###
-def list_teachers() -> List[Teacher]:
-    rows = _run("SELECT * FROM teachers ORDER BY short_name", fetchall=True) or []
-    return [Teacher(short_name=r["short_name"], full_name=r["full_name"], email=r["email"]) for r in rows]
 
 def all_login_info() -> List[dict]:
     rows = _run("SELECT * FROM logins", fetchall=True) or []
@@ -284,25 +282,25 @@ def create_booking(
     start_time: time,
     end_time: time,
     purpose: Optional[str],
-    user_email: Optional[str] = None,
+    short_name: Optional[str],
 ) -> bool:
     _run(
         """
         INSERT INTO bookings
-        (room_id, user_email, booking_date, start_time, end_time,
-         visitor_name, visitor_email, purpose, created_at)
+        (room_id, booking_date, start_time, end_time,
+         visitor_name, visitor_email, purpose, created_at, short_name)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (
+            (
             room_id,
-            (user_email.strip().lower() if user_email else None),
             booking_date.isoformat(),
             start_time.strftime("%H:%M:%S"),
             end_time.strftime("%H:%M:%S"),
             visitor_name.strip(),
             visitor_email.strip().lower(),
             (purpose or None),
-            datetime.now().isoformat(timespec="minutes"),
+            datetime.now().isoformat(timespec="seconds"),
+                (short_name.strip().upper() if short_name else None),
         ),
         commit=True,
     )
@@ -310,18 +308,47 @@ def create_booking(
 
 def _booking_from_row(r: sqlite3.Row) -> Booking:
     keys = set(r.keys())
+
+    def get(key, default=None):
+        return r[key] if key in keys else default
+
+    def parse_time(t: str | None):
+        if not t:
+            return None
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                return datetime.strptime(t, fmt).time()
+            except ValueError:
+                pass
+        raise ValueError(f"Invalid time format: {t}")
+
+    def parse_date(d: str | None):
+        if not d:
+            return None
+        return datetime.strptime(d, "%Y-%m-%d").date()
+
+    def parse_created_at(s: str | None):
+        if not s:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                pass
+        return datetime.fromisoformat(s)
+
     return Booking(
-        id=r["id"],
-        room_id=r["room_id"],
-        room_name=r["room_name"],
-        booking_date=datetime.strptime(r["booking_date"], "%Y-%m-%d").date(),
-        start_time=datetime.strptime(r["start_time"], "%H:%M:%S").time(),
-        end_time=datetime.strptime(r["end_time"], "%H:%M:%S").time(),
-        visitor_name=r["visitor_name"],
-        visitor_email=r["visitor_email"],
-        purpose=r["purpose"],
-        created_at=datetime.fromisoformat(r["created_at"]),
-        user_email=(r["user_email"] if "user_email" in keys else None),
+        id=get("id"),
+        room_id=get("room_id"),
+        room_name=get("room_name"),
+        booking_date=parse_date(get("booking_date")),
+        start_time=parse_time(get("start_time")),
+        end_time=parse_time(get("end_time")),
+        visitor_name=get("visitor_name"),
+        visitor_email=get("visitor_email"),
+        purpose=get("purpose"),
+        short_name=get("short_name"),
+        created_at=parse_created_at(get("created_at")),
     )
 
 def query_bookings(
@@ -334,11 +361,12 @@ def query_bookings(
     time_to: Optional[time] = None,
     reserver: Optional[str] = None,
     purpose: Optional[str] = None,
-) -> List[Booking]:
+    short_name: Optional[str] = None) -> List[Booking]:
     q = (
         "SELECT b.*, r.name AS room_name "
         "FROM bookings b JOIN rooms r ON r.id = b.room_id"
     )
+
     clauses: List[str] = []
     params: Tuple = ()
 
@@ -374,6 +402,11 @@ def query_bookings(
         clauses.append("LOWER(b.purpose) LIKE ?")
         params += (f"%{purpose.strip().lower()}%",)
 
+    if short_name:
+        clauses.append("UPPER(b.short_name) LIKE ?")
+        params += (f"%{short_name.strip().upper()}%",)
+
+
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY b.booking_date, b.start_time"
@@ -405,24 +438,23 @@ def update_booking(
     start_time: time,
     end_time: time,
     purpose: Optional[str],
-    user_email: Optional[str] = None,
-) -> bool:
+    short_name: str) -> bool:
     _run(
         """
         UPDATE bookings
-        SET room_id = ?, user_email = ?, booking_date = ?, start_time = ?, end_time = ?,
-            visitor_name = ?, visitor_email = ?, purpose = ?
+        SET room_id = ?, booking_date = ?, start_time = ?, end_time = ?,
+            visitor_name = ?, visitor_email = ?, purpose = ?, short_name = ?
         WHERE id = ?
         """,
         (
             room_id,
-            (user_email.strip().lower() if user_email else None),
             booking_date.isoformat(),
             start_time.strftime("%H:%M:%S"),
             end_time.strftime("%H:%M:%S"),
             visitor_name.strip(),
             visitor_email.strip().lower(),
-            (purpose or None),
+            purpose.strip(),
+            short_name.strip().upper(),
             booking_id,
         ),
         commit=True,
@@ -455,6 +487,7 @@ def is_available_excluding(
     row = _run(q, params, fetchone=True)
     return row is None
 
+
 ### Admin role functions ###
 def get_admins() -> List[str]:
     rows = _run("SELECT short_name FROM admins", fetchall=True) or []
@@ -473,17 +506,29 @@ def is_admin_check(short_name: str) -> bool:
     return r is not None
 
 ### Teacher management functions ###
+def list_teachers() -> List[Teacher]:
+    rows = _run(
+    """
+    SELECT t.short_name, t.full_name, t.email
+    FROM teachers t
+    LEFT JOIN admins a ON t.short_name = a.short_name
+    ORDER BY a.short_name IS NOT NULL DESC, t.short_name ASC;
+    """, fetchall=True) or []
+    return [Teacher(short_name=r["short_name"], full_name=r["full_name"], email=r["email"]) for r in rows]
+
 def list_teachers_with_passwords() -> List[dict]:
     teachers = list_teachers() or []
     logins = all_login_info() or []
     pw_map = {r["short_name"]: r["password"] for r in logins}
     return [{"short_name": t.short_name, "full_name": t.full_name, "email": t.email, "password": pw_map.get(t.short_name)} for t in teachers]
 
+def list_teacher_short_name(short_name: str) -> bool:
+    r = _run("SELECT 1 FROM teachers WHERE short_name = ?", (short_name,), fetchone=True)
+    return r is not None
+
 def create_teacher(short_name: str, full_name: str, email: str, password: str) -> bool:
     _run(
-        "INSERT INTO teachers (short_name, full_name, email) VALUES (?, ?, ?)",
-        (short_name, full_name, email),
-        commit=True,
+        "INSERT INTO teachers (short_name, full_name, email) VALUES (?, ?, ?)",(short_name, full_name, email),commit=True,
     )
     _run(
         """
@@ -525,5 +570,6 @@ def delete_teacher(short_name: str) -> bool:
     _run("DELETE FROM teachers WHERE short_name = ?", (short_name,), commit=True)
     return True
 
-
+def drop_db():
+    _run("DROP DATABASE")
 

@@ -12,15 +12,40 @@ def app():
     room_filter_options = {0: "All Rooms"}
     room_filter_options.update({room.id: room.name for room in rooms})
 
-    all_bookings_raw = db.get_bookings()
+    all_bookings = db.get_bookings()
 
     months = ["All", "Jan", "Feb", "Mar", "Apr", "May", "Jun","Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    
-    years = sorted({b.booking_date.year for b in all_bookings_raw})
+    years = sorted({getattr(b, "booking_date").year for b in all_bookings})
     years_options = ["All"] + [str(y) for y in years]
 
-    col1, col2 = st.columns([3, 7])
-    with col1:
+    owner_list = sorted({(getattr(b, "short_name") or "").upper() for b in all_bookings})
+    owner_options = ["All"] + owner_list
+
+    DEFAULT_COLS = [
+        "Room ID",
+        "Room",
+        "Date",
+        "Start Time",
+        "End Time",
+        "End User",
+        "Email",
+        "Purpose",
+        "Created At",
+        "Owner",
+        "ID",
+    ]
+
+    if "selected_columns" not in st.session_state:
+        # use list for session_state compatibility and stable order
+        st.session_state["selected_columns"] = list(DEFAULT_COLS)
+    for col_name in DEFAULT_COLS:
+        key_chk = f"chk_{col_name}"
+        if key_chk not in st.session_state:
+            st.session_state[key_chk] = True
+
+    col_left, col_right = st.columns([3, 7])
+
+    with col_left:
         st.subheader("Filters")
 
         def clear_filters():
@@ -35,6 +60,7 @@ def app():
                 "key_time_to",
                 "key_reserver",
                 "key_purpose",
+                "key_owner",
             ]:
                 st.session_state.pop(k, None)
             st.session_state["key_selected_room"] = 0
@@ -42,47 +68,52 @@ def app():
             st.session_state["key_time_mode"] = "All times"
             st.session_state["key_reserver"] = ""
             st.session_state["key_purpose"] = ""
+            st.session_state["key_owner"] = "All"
 
-        col_btn1, col_btn2 = st.columns([3, 2])
-        with col_btn1:
+        c1, c2 = st.columns([3, 2])
+        with c1:
             st.caption("Filters apply automatically when changed.")
-        with col_btn2:
-            st.button("Clear filters", on_click=clear_filters)
+        with c2:
+            # Use on_click callback to modify session_state safely
+            st.button("Clear filters", use_container_width=True, on_click=clear_filters)
 
         st.markdown("---")
         st.selectbox(
             "Room",
             options=list(room_filter_options.keys()),
             format_func=lambda x: room_filter_options[x],
-            key="key_selected_room")
+            key="key_selected_room",
+        )
 
         date_scope = st.selectbox(
             "Date scope",
             options=["All Dates", "Specific Date", "Specific Month/Year"],
             index=0,
-            key="key_date_mode")
+            key="key_date_mode",
+        )
 
         if date_scope == "Specific Date":
             st.date_input(
                 "Date",
                 value=st.session_state.get("key_date", date.today()),
-                key="key_date")
+                key="key_date",
+            )
             st.session_state["key_month"] = "All"
             st.session_state["key_year"] = "All"
-
         elif date_scope == "Specific Month/Year":
             st.selectbox(
                 "Month",
                 options=months,
                 index=months.index(st.session_state.get("key_month", "All")),
-                key="key_month")
+                key="key_month",
+            )
             st.selectbox(
                 "Year",
                 options=years_options,
                 index=years_options.index(st.session_state.get("key_year", "All")),
-                key="key_year")
+                key="key_year",
+            )
             st.session_state["key_date"] = None
-
         else:
             st.session_state["key_date"] = None
             st.session_state["key_month"] = "All"
@@ -92,20 +123,30 @@ def app():
             "Time scope",
             options=["All times", "Specific time range"],
             index=0,
-            key="key_time_mode")
-        
+            key="key_time_mode",
+        )
+
         if time_scope == "Specific time range":
-            col_t1, col_t2 = st.columns(2)
-            with col_t1:
+            ct1, ct2 = st.columns(2)
+            with ct1:
                 st.time_input(
                     "From",
                     value=st.session_state.get("key_time_from", time(hour=9, minute=0)),
-                    key="key_time_from")
-            with col_t2:
+                    key="key_time_from",
+                )
+            with ct2:
                 st.time_input(
                     "To",
                     value=st.session_state.get("key_time_to", time(hour=17, minute=0)),
-                    key="key_time_to")
+                    key="key_time_to",
+                )
+
+        st.selectbox(
+            "Owner contains (Initial)",
+            options=owner_options,
+            index=owner_options.index(st.session_state.get("key_owner", "All")) if st.session_state.get("key_owner", "All") in owner_options else 0,
+            key="key_owner",
+        )
 
         st.text_input(
             "Reserver name contains",
@@ -127,12 +168,13 @@ def app():
     year_int = None
     sel_month = st.session_state.get("key_month")
     sel_year = st.session_state.get("key_year")
+
     if sel_date_scope == "Specific Date":
         date_of_booked = st.session_state.get("key_date", date.today())
     elif sel_date_scope == "Specific Month/Year":
-        if sel_month != "All":
+        if sel_month and sel_month != "All":
             month_int = months.index(sel_month)
-        if sel_year != "All":
+        if sel_year and sel_year != "All":
             year_int = int(sel_year)
 
     sel_time_scope = st.session_state.get("key_time_mode")
@@ -143,8 +185,11 @@ def app():
         time_from = None
         time_to = None
 
+    sel_owner = st.session_state.get("key_owner") or "All"
     sel_reserver = st.session_state.get("key_reserver") or ""
     sel_purpose = st.session_state.get("key_purpose") or ""
+
+    owner_filter_value = None if sel_owner == "All" else sel_owner
 
     try:
         bookings = db.query_bookings(
@@ -157,54 +202,81 @@ def app():
             time_to=time_to,
             reserver=sel_reserver,
             purpose=sel_purpose,
+            short_name=owner_filter_value,
         )
     except Exception:
-        bookings = (
-            db.get_bookings(),
-            room_id,
-            sel_date_scope,
-            date_of_booked,
-            month_int,
-            year_int,
-            time_from,
-            time_to,
-            sel_reserver,
-            sel_purpose,
-        )
+        bookings = db.get_bookings()
 
     all_bookings_raw = db.get_bookings()
 
     def row(b):
+        start_t = getattr(b, "start_time", None)
+        end_t = getattr(b, "end_time", None)
+        created_at = getattr(b, "created_at", None)
+        booking_date_val = getattr(b, "booking_date", None)
         return {
-            "Room ID": b.room_id,
-            "Room": b.room_name,
-            "Date": b.booking_date.strftime("%Y-%m-%d"),
-            "Start Time": b.start_time.strftime("%H:%M"),
-            "End Time": b.end_time.strftime("%H:%M"),
-            "Reserver": b.visitor_name,
-            "Email": b.visitor_email,
-            "Purpose": b.purpose,
-            "Created At": b.created_at.strftime("%Y-%m-%d %H:%M"),
-            "User Email": b.user_email or "",
+            "Room ID": getattr(b, "room_id", None),
+            "Room": getattr(b, "room_name", None),
+            "Date": booking_date_val.strftime("%Y-%m-%d") if booking_date_val else None,
+            "Start Time": start_t.strftime("%H:%M") if start_t else None,
+            "End Time": end_t.strftime("%H:%M") if end_t else None,
+            "End User": getattr(b, "visitor_name", None),
+            "Email": getattr(b, "visitor_email", None),
+            "Purpose": getattr(b, "purpose", None),
+            "Created At": created_at.strftime("%Y-%m-%d %H:%M") if created_at else None,
+            "Owner": (getattr(b, "short_name", "") or "").upper(),
+            "ID": getattr(b, "id", None),
         }
 
     filtered_df = pd.DataFrame([row(b) for b in bookings])
     all_df = pd.DataFrame([row(b) for b in all_bookings_raw])
 
-    with col2:
+    with col_right:
         st.subheader("Filtered results")
+
         if filtered_df.empty:
-            st.info("No bookings found with the selected filters.", icon="🔍")
-        else:
-            st.dataframe(filtered_df, use_container_width=True)
+            filtered_df = all_df.copy()
+
+        top_bar_left, top_bar_right = st.columns([6, 1])
+        with top_bar_left:
+            st.caption("Columns for Filtered results")
+        with top_bar_right:
+            with st.popover("Columns"):
+                    sel_cols = st.session_state.get("selected_columns", list(DEFAULT_COLS))
+                    if not isinstance(sel_cols, list):
+                        try:
+                            sel_cols = list(sel_cols)
+                        except Exception:
+                            sel_cols = list(DEFAULT_COLS)
+                    for col_name in DEFAULT_COLS:
+                        current = st.session_state.get(f"chk_{col_name}", True)
+                        new_val = st.checkbox(col_name, value=current, key=f"chk_{col_name}")
+                        if new_val:
+                            if col_name not in sel_cols:
+                                sel_cols.append(col_name)
+                        else:
+                            if col_name in sel_cols:
+                                sel_cols.remove(col_name)
+                    sel_cols = [c for c in DEFAULT_COLS if c in sel_cols]
+                    st.session_state["selected_columns"] = sel_cols
+                    def _reset_columns():
+                        st.session_state["selected_columns"] = list(DEFAULT_COLS)
+                        for col_name in DEFAULT_COLS:
+                            st.session_state[f"chk_{col_name}"] = True
+
+                    st.button("Reset", use_container_width=True, on_click=_reset_columns)
+
+        show_cols = [c for c in list(st.session_state["selected_columns"]) if c in filtered_df.columns]
+        if not show_cols:
+            show_cols = [c for c in DEFAULT_COLS if c in filtered_df.columns]
+
+        st.dataframe(filtered_df[show_cols], use_container_width=True)
+
         st.markdown(
-            f"Showing {len(filtered_df)} filtered booking(s) out of {len(all_df)} total.",
+            f"Showing {len(filtered_df)} booking(s) out of {len(all_df)} total.",
             unsafe_allow_html=True,
         )
 
         st.markdown("---")
         st.subheader("All bookings")
-        if all_df.empty:
-            st.info("No bookings in the system.", icon="🔍")
-        else:
-            st.dataframe(all_df, use_container_width=True)
+        st.dataframe(all_df[[c for c in DEFAULT_COLS if c in all_df.columns]], use_container_width=True)
