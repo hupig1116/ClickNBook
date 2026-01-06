@@ -148,7 +148,7 @@ def _edit_booking_dialog(booking):
             )
             if not ok:
                 st.error("Failed to update booking")
-        st.success("Teacher updated")
+        st.success("Booking updated")
         time_mod.sleep(0.4)
         st.rerun()
 
@@ -285,7 +285,8 @@ def _admin_bookings_filters():
     years_options = ["All"] + [str(y) for y in years]
 
     # build owner list safely (normalize None to empty string and uppercase)
-    owner = sorted({(b.short_name or "").upper() for b in all_bookings})
+    # exclude empty/blank short_names so the dropdown doesn't show an empty option
+    owner = sorted({(b.short_name or "").upper() for b in all_bookings if (getattr(b, "short_name", None) or "").strip()})
     owner_options = ["All"] + owner
 
     col_filters, col_result = st.columns([3, 7])
@@ -491,18 +492,7 @@ def _admin_bookings_filters():
             st.info("No Bookings Found based on your Selected Filters.", icon="🔍")
 
         elif db.count_bookings() != 0:
-            col_top = st.columns([1, 1, 1, 1.5, 0.8, 0.8])
-            with col_top[0]:
-                st.markdown("Time")
-            with col_top[1]:
-                st.markdown("Reserver")
-            with col_top[2]:
-                st.markdown("Owner")
-            with col_top[3]:
-                st.markdown("Purpose")
-
             for b in current_page:
-                # prepare display values
                 room = getattr(b, "room_name", "") or ""
                 booking_date_val = getattr(b, "booking_date", None)
                 booking_date_str = booking_date_val.strftime("%Y-%m-%d") if booking_date_val else ""
@@ -517,7 +507,6 @@ def _admin_bookings_filters():
                 created = getattr(b, "created_at", None)
                 created_str = created.strftime("%Y-%m-%d %H:%M") if created else ""
 
-                # render a two-column card: content on the left, actions on the right
                 box = st.container()
                 with box:
                     left, right = st.columns([9, 1.5])
@@ -544,7 +533,6 @@ def _admin_bookings_filters():
                             unsafe_allow_html=True,
                         )
                     with right:
-                        # place buttons vertically, full width for easy tapping
                         if st.button("Edit", key=f"edit_b_{b.id}", use_container_width=True):
                             _edit_booking_dialog(b)
                         if st.button("Delete", key=f"del_b_{b.id}", use_container_width=True):
@@ -771,32 +759,8 @@ def app():
             reserver_email = st.text_input("Email Address", value=user.email or "")
             purpose = st.text_area("Purpose of Meeting", placeholder="Brief description of the meeting purpose", height=120)
 
-            # If the logged-in user is an admin, allow selecting an owner (teacher) for the booking.
-            booking_owner = None
-            if _is_admin(user):
-                teachers = db.list_teachers() or []
-                # Build options with an explicit empty choice so admin must consciously pick an owner
-                teacher_keys = [""] + [getattr(t, "short_name", None) for t in teachers if getattr(t, "short_name", None)]
-
-                if len(teacher_keys) <= 1:
-                    st.info("No teacher accounts available to assign as booking owner. Please add a teacher first.")
-
-                def _fmt_owner(s):
-                    if not s:
-                        return "-- Select teacher owner --"
-                    for t in teachers:
-                        if getattr(t, "short_name", None) == s:
-                            return f"{s} - {getattr(t, 'full_name', '')}"
-                    return s
-
-                # default to the empty choice (force admin to select explicitly)
-                booking_owner = st.selectbox(
-                    "Booking Owner (teacher)",
-                    options=teacher_keys,
-                    format_func=_fmt_owner,
-                    index=0,
-                    key="key_booking_owner",
-                )
+            # Admin bookings: owner will be set automatically to the logged-in admin account.
+            # No owner selection is shown; the system will store the admin's short_name as the booking owner.
         submitted = st.form_submit_button("Create Booking")
 
     if submitted:
@@ -824,16 +788,9 @@ def app():
        
         else:
             if db.is_available(selected_room_id, booking_date, start_time, end_time):
-                # Determine admin status and owner selection
+                # Determine admin status and set booking owner automatically for admins
                 is_admin = _is_admin(user)
-                owner_short = None
-                if is_admin:
-                    # prefer explicit booking_owner selected in the form (for admin users)
-                    owner_short = (st.session_state.get("key_booking_owner") or "").strip().upper() or None
-                    # If the built-in admin user didn't pick a valid teacher, fall back to None to avoid FK error
-                    if owner_short and not db.list_teacher_short_name(owner_short):
-                        # invalid selection -> null out to avoid integrity error
-                        owner_short = None
+                owner_short = (user.short_name or "").strip().upper() if is_admin else None
 
                 success = db.create_booking(
                     room_id=selected_room_id,

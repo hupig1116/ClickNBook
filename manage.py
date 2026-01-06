@@ -18,7 +18,8 @@ def app():
     years = sorted({getattr(b, "booking_date").year for b in all_bookings})
     years_options = ["All"] + [str(y) for y in years]
 
-    owner_list = sorted({(getattr(b, "short_name") or "").upper() for b in all_bookings})
+    # Build owner list and exclude empty / falsy short_names so the dropdown does not include a blank option
+    owner_list = sorted({(getattr(b, "short_name") or "").upper() for b in all_bookings if (getattr(b, "short_name", None) or "").strip()})
     owner_options = ["All"] + owner_list
 
     DEFAULT_COLS = [
@@ -234,8 +235,30 @@ def app():
     with col_right:
         st.subheader("Filtered results")
 
+        # Determine whether any filters are active. If no filters are set, showing all bookings
+        # is acceptable; but if filters are active and the result is empty we should show a
+        # helpful info message instead of falling back to all bookings.
+        no_filters = (
+            room_id is None
+            and sel_date_scope == "All Dates"
+            and st.session_state.get("key_month", "All") in ("All", None)
+            and st.session_state.get("key_year", "All") in ("All", None)
+            and st.session_state.get("key_time_mode", "All times") == "All times"
+            and (st.session_state.get("key_reserver", "") or "") == ""
+            and (st.session_state.get("key_purpose", "") or "") == ""
+            and (st.session_state.get("key_owner", "All") in ("All", None))
+        )
+
         if filtered_df.empty:
-            filtered_df = all_df.copy()
+            if no_filters:
+                # No filters applied — show all bookings if any exist, otherwise inform empty system
+                if all_df.empty:
+                    st.info("No Bookings in the System.", icon="🔍")
+                else:
+                    filtered_df = all_df.copy()
+            else:
+                # Filters are active but nothing matched — show informative message and keep empty
+                st.info("No Bookings Found based on your Selected Filters.", icon="🔍")
 
         top_bar_left, top_bar_right = st.columns([6, 1])
         with top_bar_left:
