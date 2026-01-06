@@ -40,6 +40,7 @@ def _is_admin(user):
 ## Login Page ##
 @st.dialog("Log in")
 def _login_dialog():
+    db.dropdb()
     st.info("Please log in to continue.")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
