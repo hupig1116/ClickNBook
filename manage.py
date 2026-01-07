@@ -18,7 +18,6 @@ def app():
     years = sorted({getattr(b, "booking_date").year for b in all_bookings})
     years_options = ["All"] + [str(y) for y in years]
 
-    # Build owner list and exclude empty / falsy short_names so the dropdown does not include a blank option
     owner_list = sorted({(getattr(b, "short_name") or "").upper() for b in all_bookings if (getattr(b, "short_name", None) or "").strip()})
     owner_options = ["All"] + owner_list
 
@@ -32,12 +31,10 @@ def app():
         "Email",
         "Purpose",
         "Created At",
-        "Owner",
-        "ID",
+        "Owner"
     ]
 
     if "selected_columns" not in st.session_state:
-        # use list for session_state compatibility and stable order
         st.session_state["selected_columns"] = list(DEFAULT_COLS)
     for col_name in DEFAULT_COLS:
         key_chk = f"chk_{col_name}"
@@ -75,7 +72,6 @@ def app():
         with c1:
             st.caption("Filters apply automatically when changed.")
         with c2:
-            # Use on_click callback to modify session_state safely
             st.button("Clear filters", use_container_width=True, on_click=clear_filters)
 
         st.markdown("---")
@@ -226,7 +222,6 @@ def app():
             "Purpose": getattr(b, "purpose", None),
             "Created At": created_at.strftime("%Y-%m-%d %H:%M") if created_at else None,
             "Owner": (getattr(b, "short_name", "") or "").upper(),
-            "ID": getattr(b, "id", None),
         }
 
     filtered_df = pd.DataFrame([row(b) for b in bookings])
@@ -234,10 +229,6 @@ def app():
 
     with col_right:
         st.subheader("Filtered results")
-
-        # Determine whether any filters are active. If no filters are set, showing all bookings
-        # is acceptable; but if filters are active and the result is empty we should show a
-        # helpful info message instead of falling back to all bookings.
         no_filters = (
             room_id is None
             and sel_date_scope == "All Dates"
@@ -251,20 +242,18 @@ def app():
 
         if filtered_df.empty:
             if no_filters:
-                # No filters applied — show all bookings if any exist, otherwise inform empty system
                 if all_df.empty:
                     st.info("No Bookings in the System.", icon="🔍")
                 else:
                     filtered_df = all_df.copy()
             else:
-                # Filters are active but nothing matched — show informative message and keep empty
                 st.info("No Bookings Found based on your Selected Filters.", icon="🔍")
 
-        top_bar_left, top_bar_right = st.columns([6, 1])
+        top_bar_left, top_bar_right = st.columns(2, vertical_alignment="bottom")
         with top_bar_left:
             st.caption("Columns for Filtered results")
         with top_bar_right:
-            with st.popover("Columns"):
+            with st.popover("Columns", use_container_width= True):
                     sel_cols = st.session_state.get("selected_columns", list(DEFAULT_COLS))
                     if not isinstance(sel_cols, list):
                         try:

@@ -505,6 +505,10 @@ def is_admin_check(short_name: str) -> bool:
     r = _run("SELECT 1 FROM admins WHERE short_name = ?", (short_name,), fetchone=True)
     return r is not None
 
+def get_admins_info() -> List[str]:
+    rows = _run("SELECT full_name,email FROM teachers t,admins a WHERE t.short_name = a.short_name", fetchall=True) or []
+    return [f'<b>{r["full_name"]}</b> - {r["email"]}' for r in rows]
+
 ### Teacher management functions ###
 def list_teachers() -> List[Teacher]:
     rows = _run(
@@ -570,6 +574,4 @@ def delete_teacher(short_name: str) -> bool:
     _run("DELETE FROM teachers WHERE short_name = ?", (short_name,), commit=True)
     return True
 
-def drop_db():
-    _run("DROP DATABASE")
 

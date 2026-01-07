@@ -8,7 +8,6 @@ import db
 def _ensure_time(tval):
     if tval is None:
         return None
-    # already a time
     try:
         from datetime import time as _time
     except Exception:
@@ -16,7 +15,6 @@ def _ensure_time(tval):
     if isinstance(tval, datetime):
         return tval.time()
     if hasattr(tval, 'hour') and hasattr(tval, 'minute'):
-        # likely a datetime.time
         return tval
     if isinstance(tval, str):
         for fmt in ("%H:%M:%S", "%H:%M"):
@@ -29,10 +27,10 @@ def _ensure_time(tval):
 def _is_admin(user):
     if not user:
         return False
-    if user.short_name == "admin":
+    short = (getattr(user, "short_name", "") or "").strip().upper()
+    if short == "ADMIN":
         return True
-    db.get_admins()
-    return db.is_admin_check(user.short_name)
+    return db.is_admin_check(short)
 
 ## Login Page ##
 @st.dialog("Log in")
@@ -45,14 +43,14 @@ def _login_dialog():
             st.error("Please enter both username and password")
         else:
             if username.strip() == "Admin" and password.strip() == "Admin":
-                st.session_state.user = db.Teacher(short_name="admin", full_name="Administrator", email="admin@example.com")
+                st.session_state.user = db.Teacher(short_name="ADMIN", full_name="Administrator", email="admin@example.com")
                 st.success("Log in successful")
                 time_mod.sleep(1.0)
                 st.rerun()
             else:
                 success = db.verify_login(username.strip(), password.strip())
                 if success:
-                    st.session_state.user = success
+                    st.session_state.user = db.Teacher(short_name=(success.short_name or "").strip().upper(), full_name=success.full_name, email=success.email)
                     st.success("Log in successful")
                     time_mod.sleep(1.0)
                     st.rerun()
@@ -60,7 +58,6 @@ def _login_dialog():
                     st.error("Invalid credentials")
 
 ## Admin edit booking Function ##
-
 @st.dialog("Edit Booking")
 def _edit_booking_dialog(booking):
     rooms = db.get_all_rooms()
@@ -153,11 +150,19 @@ def _edit_booking_dialog(booking):
 
 @st.dialog("Delete Booking")
 def _delete_booking_dialog(booking):
-    st.subheader("Delete Booking")
-    st.error(
-        f"Delete booking for {booking.visitor_name} in {booking.room_name} on {booking.booking_date} "
-        f"from {booking.start_time.strftime('%H:%M')} to {booking.end_time.strftime('%H:%M')}?"
-    )
+    delete_html = f"""
+    <div style="background-color:#ffe5e5;padding:10px;border-radius:12px;margin-bottom:10px">
+    <strong>You are about to Delete Booking:</strong><br><br>
+    <strong>Room: </strong> {booking.room_name}<br>
+    <strong>Booking Date: </strong> {booking.booking_date}<br>
+    <strong>Time: </strong>From {booking.start_time.strftime('%H:%M')} To {booking.end_time.strftime('%H:%M')}<br>
+    <strong>End User: </strong> {booking.visitor_email}<br>
+    <strong>Owner: </strong> {booking.short_name}<br>
+    <strong>Purpose: </strong> {booking.purpose}
+    </div>
+    """
+    st.markdown(delete_html, unsafe_allow_html=True)
+    
     if st.button("Confirm delete"):
         db.delete_booking_by_id(booking.id)
         st.success("Booking deleted")
@@ -277,12 +282,9 @@ def _admin_bookings_filters():
         room_filter_options[room.id] = room.name
     all_bookings = db.get_bookings()
     months = ["All", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    # build years safely (skip bookings with no date)
     years = sorted({b.booking_date.year for b in all_bookings if getattr(b, "booking_date", None) is not None})
     years_options = ["All"] + [str(y) for y in years]
 
-    # build owner list safely (normalize None to empty string and uppercase)
-    # exclude empty/blank short_names so the dropdown doesn't show an empty option
     owner = sorted({(b.short_name or "").upper() for b in all_bookings if (getattr(b, "short_name", None) or "").strip()})
     owner_options = ["All"] + owner
 
@@ -311,11 +313,11 @@ def _admin_bookings_filters():
             st.session_state["key_reserver"] = ""
             st.session_state["key_purpose"] = ""
 
-        col_btn1, col_btn2 = st.columns([3, 2])
+        col_btn1, col_btn2 = st.columns([6, 5])
         with col_btn1:
             st.caption("Filters apply automatically when changed.")
         with col_btn2:
-            st.button("Clear filters", on_click=clear_filters)
+            st.button("Clear filters",use_container_width = True, on_click=clear_filters)
 
         st.markdown("---")
         st.selectbox(
@@ -421,12 +423,10 @@ def _admin_bookings_filters():
     sel_reserver = st.session_state.get("key_reserver") or ""
     sel_purpose = st.session_state.get("key_purpose") or ""
 
-    # Normalize filter params: convert UI sentinel values ("All" / empty) to None
     owner_param = None if (not sel_owner or sel_owner == "All") else sel_owner
     reserver_param = None if not sel_reserver.strip() else sel_reserver.strip()
     purpose_param = None if not sel_purpose.strip() else sel_purpose.strip()
 
-    # If no meaningful filters are set, return all bookings directly to avoid accidental empty results
     no_filters = (
         room_id is None
         and sel_date_scope == "All Dates"
@@ -471,13 +471,13 @@ def _admin_bookings_filters():
     with col_result:
         st.subheader("Filtered Bookings")
         st.caption(f"Showing {len(current_page)} of {total} bookings")
-        nav_col1, nav_col2, nav_col3 = st.columns([1, 1, 8])
+        nav_col1, nav_col2 = st.columns([1, 1])
         with nav_col1:
-            if st.button("Prev", disabled=page_index <= 0):
+            if st.button("Prev", use_container_width= True, disabled=page_index <= 0):
                 st.session_state["key_page_index"] = max(0, page_index - 1)
                 st.rerun()
         with nav_col2:
-            if st.button("Next", disabled=page_index >= max_index):
+            if st.button("Next",use_container_width= True, disabled=page_index >= max_index):
                 st.session_state["key_page_index"] = min(max_index, page_index + 1)
                 st.rerun()
 
@@ -506,7 +506,7 @@ def _admin_bookings_filters():
 
                 box = st.container()
                 with box:
-                    left, right = st.columns([9, 1.5])
+                    left, right = st.columns([9, 2.1])
                     with left:
                         st.markdown(
                             f"""
@@ -532,7 +532,7 @@ def _admin_bookings_filters():
                     with right:
                         if st.button("Edit", key=f"edit_b_{b.id}", use_container_width=True):
                             _edit_booking_dialog(b)
-                        if st.button("Delete", key=f"del_b_{b.id}", use_container_width=True):
+                        if st.button("Delete", key=f"del_b_{b.id}", use_container_width= True):
                             _delete_booking_dialog(b)
 
             @st.dialog("Delete All Bookings")
@@ -551,65 +551,102 @@ def _admin_bookings_filters():
 
 #### Admin Teacher Management ###
 def admin_panel_teacher(user):
-    db.get_admins()
-    records = db.list_teachers_with_passwords()
-    admin_set = set(db.get_admins())
-    st.subheader("Teacher Directory")
+    records = db.list_teachers_with_passwords() or []
+    admin_set_raw = db.get_admins() or []
+    admin_set = {str(a).strip().lower() for a in admin_set_raw}
 
-     
-def admin_panel_teacher(user):
-    records = db.list_teachers_with_passwords()
-    admin_set = set(db.get_admins())
     st.subheader("Teacher Directory")
+    st.caption(f"Total Teacher: {len(records)-1} ")
 
     if not records:
         st.info("No teachers found.")
-    else:
-        st.caption(f"Total teachers: {len(records) -1}")
-        for r in records:
-            is_admin = r.get("short_name").lower() == "admin"
-            if is_admin:
-                continue
-                
-            is_self = r.get("short_name") == getattr(user, "short_name", None)
-            role = "Admin" if r.get("short_name") in admin_set else "Teacher"
+        return
 
-            teacher_header_html = (
-                f"<div style='background-color:#fff9e5;padding:8px;border-radius:6px;margin-bottom:8px'>"
-                f"<strong>{r['full_name']}</strong>&emsp;&emsp;&emsp;"
-                f"<span style='background:#222;color:#fff;border-radius:4px;padding:2px 6px;font-size:12px'>{role}</span>"
-                f"</div>"
-            )
+    st.markdown(
+        """
+        <style>
+        .teacher-header {
+            margin-bottom: 8px;
+            border-radius: 8px;
+            padding: 8px;
+            color: black;
+        }
+        .teacher-details {
+            color: black;
+            font-size: 14px;
+        }
+        .role-badge {
+            background: black;
+            color: white;
+            border-radius: 8px;
+            padding: 2px 6px;
+            font-size: 12px;
+            margin-left: 8px;
+            display: inline-block;
+            vertical-align: middle;
+        }
 
-            admin_header_html = (
-                f"<div style='background-color:#f2e5ff;padding:8px;border-radius:6px;margin-bottom:8px'>"
-                f"<strong>{r['full_name']}</strong>&emsp;&emsp;&emsp;"
-                f"<span style='background:#222;color:#fff;border-radius:4px;padding:2px 6px;font-size:12px'>{role}</span>"
-                f"</div>"
-            )
-                
+        .stButton > button {
+            border-radius: 8px;
+            padding: 8px 12px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-            box = st.container(border=True)
-            with box:
-                if role == "Teacher":
-                    st.markdown(teacher_header_html, unsafe_allow_html=True)
-                else :
-                    st.markdown(admin_header_html, unsafe_allow_html=True)
-                    
-                col_top = st.columns([2.5, 2.5, 2.5, 0.6, 1])
-            with col_top[0]:
-                st.write(r["email"])
-            with col_top[1]:
-                st.write(r["short_name"])
-            with col_top[2]:
-                st.write(r.get("password", ""))
-            with col_top[3]:
-                if st.button("Edit", key=f"edit_t_{r.get('short_name')}", disabled=True):
-                    _edit_teacher_dialog(r, getattr(user.short_name))  
-            with col_top[4]:
-                if st.button("Delete", key=f"del_t_{r.get('short_name')}", disabled=True):
-                        _delete_teacher_dialog(r, user.short_name)
+    norm = []
+    for r in records:
+        if not isinstance(r, dict):
+            r = db.list_teachers_with_passwords()
+            
+        short = (r.get("short_name") or "")
+        if short.strip().lower() == "admin":
+            continue
+        norm.append(r)
 
+    for row_start in range(0, len(records), 2):
+        cols = st.columns(2)
+        for col_index, col in enumerate(cols):
+            idx = row_start + col_index
+            if idx >= len(norm):
+                break
+            r = norm[idx]
+
+            short_name = r.get("short_name")
+            full_name  = r.get("full_name")
+            email      = r.get("email")
+            password   = r.get("password")
+
+            is_admin = short_name.strip().lower() in admin_set
+            role = "Admin" if is_admin else "Teacher"
+            header_bg = "#f2e5ff" if is_admin else "#fff9e5"
+
+            with col:
+                card = st.container(border=True)
+                with card:
+                    st.markdown(
+                        f"""
+                        <div class='teacher-header' style='background-color:{header_bg};'>
+                            <b>{full_name}</b>
+                            <span class='role-badge'>{role}</span>
+                        </div>
+
+                        <div class='teacher-details'>
+                            <div><b>Username: </b> {short_name}</div>
+                            <div><b>Email: </b> {email}</div>
+                            <div><b>Password: </b> {password}</div><br>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                    a, b = st.columns(2)
+                    with a:
+                        if st.button("Edit", key=f"edit_t_{short_name}", use_container_width=True):
+                            _edit_teacher_dialog(r, getattr(user, "short_name", ""))
+                    with b:
+                        if st.button("Delete", key=f"del_t_{short_name}", use_container_width=True):
+                            _delete_teacher_dialog(r, getattr(user, "short_name", ""))
 
     st.subheader("Add New Teacher")
     st.caption("Create a new teacher account")
@@ -622,11 +659,7 @@ def admin_panel_teacher(user):
         with col2:
             new_password = (st.text_input("Password", type="password") or "").strip()
             new_email = (st.text_input("Email") or "").strip().lower()
-            tempcol1, tempcol2 = st.columns([3, 1])
-            with tempcol1:
-                st.caption("")
-            with tempcol2:
-                submit = st.form_submit_button("Add teacher")
+        submit = st.form_submit_button("Add teacher")
 
         if submit:
             errors = []
@@ -707,6 +740,7 @@ def admin_panel_teacher(user):
 
                 add_teacher_dialog()
 
+###room booking###
 def app():
     st.set_page_config(layout="wide")
     st.markdown("<h1 style='text-align: center;'>Reserve</h1>", unsafe_allow_html=True)
@@ -720,13 +754,13 @@ def app():
         _login_dialog()
         st.stop()
     else:
-        top_bar = st.columns([7, 1])
+        top_bar = st.columns([7, 2],vertical_alignment="bottom")
         with top_bar[0]:
             st.write(f"Logged in as: **{user.full_name} ({user.short_name})**")
         with top_bar[1]:
-            if st.button("Log out"):
+            if st.button("Log out", use_container_width="True"):
                 st.session_state.user = None
-                st.rerun()
+                st.rerun()  
 
     rooms = db.get_all_rooms()
     if not rooms:
@@ -749,65 +783,92 @@ def app():
         with col2:
             reserver_name = st.text_input("End User Full Name", value=user.full_name or "")
             reserver_email = st.text_input("Email Address", value=user.email or "")
-            purpose = st.text_area("Purpose of Meeting", placeholder="Brief description of the meeting purpose", height=120)
-
-            # Admin bookings: owner will be set automatically to the logged-in admin account.
-            # No owner selection is shown; the system will store the admin's short_name as the booking owner.
+            purpose = st.text_area("Purpose of Meeting", placeholder="Brief description of the meeting purpose", height="stretch")
         submitted = st.form_submit_button("Create Booking")
 
-    if submitted:
-        errors = []
-        if not reserver_name.strip():
-            errors.append("Reserver name is required")
-        if not reserver_email.strip():
-            errors.append("Reserver email is required")
-        elif "@" not in reserver_email:
-            errors.append("A valid email address is required")
+        if submitted:
+            errors = []
+            if not reserver_name.strip():
+                errors.append("Reserver name is required")
+            if not reserver_email.strip():
+                errors.append("Reserver email is required")
+            elif "@" not in reserver_email:
+                errors.append("A valid email address is required")
 
-        # Normalize time inputs to avoid type issues (str vs time vs None)
-        start_time = _ensure_time(start_time)
-        end_time = _ensure_time(end_time)
+            start_time = _ensure_time(start_time)
+            end_time = _ensure_time(end_time)
 
-        if start_time is None or end_time is None:
-            errors.append("Start time and end time are required and must be valid.")
-        elif start_time >= end_time:
-            errors.append("End time must be after start time")
-        if not purpose.strip():
-            errors.append("Purpose of meeting is required")
-        if errors:
-            for e in errors:
-                st.error(e)
-       
-        else:
-            if db.is_available(selected_room_id, booking_date, start_time, end_time):
-                # Determine admin status and set booking owner automatically for admins
-                is_admin = _is_admin(user)
-                owner_short = (user.short_name or "").strip().upper() if is_admin else None
-
-                success = db.create_booking(
-                    room_id=selected_room_id,
-                    visitor_name=reserver_name.strip(),
-                    visitor_email=reserver_email.strip(),
-                    booking_date=booking_date,
-                    start_time=start_time,
-                    end_time=end_time,
-                    purpose=purpose.strip(),
-                    short_name=owner_short,
-                )
-
-                if success:
-                    st.success(
-                        f"Booking created for {room_options[selected_room_id]} "
-                        f"on {booking_date} from {start_time.strftime('%H:%M')} to {end_time.strftime('%H:%M')}"
-                    )
-                else:
-                    st.error("Failed to create booking. Please try again.")
+            if start_time is None or end_time is None:
+                errors.append("Start time and end time are required and must be valid.")
+            elif start_time >= end_time:
+                errors.append("End time must be after start time")
+            if not purpose.strip():
+                errors.append("Purpose of meeting is required")
+            if errors:
+                for e in errors:
+                    st.error(e)
             else:
-                st.error(
-                    f"The selected room is not available during "
-                    f"{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')} on {booking_date}. "
-                    "Please choose a different time slot or room."
-                )
+                if db.is_available(selected_room_id, booking_date, start_time, end_time):
+                    admin_info = db.get_admins_info()
+                    admins_break =  "<br>".join(admin_info)
+                    owner_short = None
+                    if user and getattr(user, "short_name", None):
+                        candidate = (user.short_name or "").strip().upper()
+                        if db.list_teacher_short_name(candidate):
+                            owner_short = candidate
+                
+                    booking_html = f"""
+                    <div style="background-color:#ccffff;padding:15px;border-radius:12px;margin-bottom:10px">
+                    <strong>You are about to Create Booking:</strong><br><br>
+                    <strong>Room: </strong> {room_options[selected_room_id]}<br>
+                    <strong>Booking Date: </strong> {booking_date}<br>
+                    <strong>Time: </strong>From {start_time.strftime('%H:%M')} To {end_time.strftime('%H:%M')}<br>
+                    <strong>End User: </strong> {reserver_name.strip()}<br>
+                    <strong>Purpose: </strong> {purpose.strip()}
+                    </div>
+                    """
+
+                    booking_content_alert_html = f"""
+                    <div style="background-color:#ffe5e5;padding:15px;border-radius:12px;margin-bottom:10px">
+                    <b>🚨Once your booking is confirmed, you can't edit or delete it.<br> 
+                    If you need any changes, please contact the administrator:</b><br><br>
+                    <b>Admin: </b><br>
+                    <b>IT Department</b> - admin@example.com<br>
+                    {admins_break}  
+                    </div>
+                    """
+
+                    @st.dialog("Comfirm Booking")
+                    def comfirm_booking_dialog():
+                            st.markdown(booking_html, unsafe_allow_html=True)
+                            st.markdown(booking_content_alert_html, unsafe_allow_html= True)
+
+                            if st.button("Comfirm Booking"):
+                                    success = db.create_booking(
+                                        room_id=selected_room_id,
+                                        visitor_name=reserver_name.strip(),
+                                        visitor_email=reserver_email.strip(),
+                                        booking_date=booking_date,
+                                        start_time=start_time,
+                                        end_time=end_time,
+                                        purpose=purpose.strip(),
+                                        short_name=owner_short,
+                                    )
+                                    if success:
+                                        st.success("Success for Booking")
+                                        time_mod.sleep(0.8)
+                                        st.rerun()
+
+                                    else:
+                                        st.error("Failed to create booking. Please try again.")
+                    comfirm_booking_dialog()
+                else:
+                    st.error(
+                        f"The selected room is not available during "
+                        f"{start_time.strftime('%H:%M')} - {end_time.strftime('%H:%M')} on {booking_date}. "
+                        "Please choose a different time slot or room."
+                    )
+            
 
 
     if _is_admin(user):

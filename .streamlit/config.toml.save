@@ -1,0 +1,15 @@
+[theme]
+base="light"
+
+
+git add .streamlit/config.toml
+git commit -m "Force light mode theme"
+git push origin main
+
+
+^X
+
+[theme]
+base="light"
+^X
+
