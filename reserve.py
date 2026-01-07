@@ -6,9 +6,6 @@ import db
 
 
 def _ensure_time(tval):
-    """Normalize a time-like value to a datetime.time or None.
-    Accepts datetime.time, datetime.datetime, or strings like 'HH:MM' or 'HH:MM:SS'.
-    """
     if tval is None:
         return None
     # already a time
@@ -569,7 +566,6 @@ def admin_panel_teacher(user):
         st.info("No teachers found.")
     else:
         st.caption(f"Total teachers: {len(records)}")
-        
         for r in records:
 			is_self = r["short_name"] == user.short_name
 			is_admin = r["short_name"] in admin_set
@@ -599,8 +595,8 @@ def admin_panel_teacher(user):
                 else:
                     if st.button("Edit", key=f"edit_t_{r['short_name']}"):
                         _edit_teacher_dialog(r, user.short_name)
-            with col_top[4]:
-                if is_admin:
+			with col_top[4]:
+				if is_admin:
                     st.button("Delete", key=f"del_t_{r['short_name']}", disabled=True)
                 else:
                     if st.button("Delete", key=f"del_t_{r['short_name']}"):
