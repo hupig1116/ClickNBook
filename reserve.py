@@ -594,7 +594,7 @@ def admin_panel_teacher(user):
 
             box = st.container(border=True)
             with box:
-                if role = "Admin":
+                if role == "Admin":
                     st.markdown(admin_header_html, unsafe_allow_html=True)
                 else:
                     st.markdown(teacher_header_html, unsafe_allow_html=True)
