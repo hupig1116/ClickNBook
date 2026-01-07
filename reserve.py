@@ -566,37 +566,38 @@ def admin_panel_teacher(user):
         
         for r in records:
 			is_self = r["short_name"] == user.short_name
-			is_admin = r["short_name"] in admin_set
+			is_admin = r["short_name"] == "Admin"
 			role = "Admin" if is_admin else "Teacher"
 			
 		    header_html = (
-			f"<div style='background-color:#fff9e5;padding:8px;border-radius:6px;margin-bottom:8px'>"
-			f"<strong>{r['full_name']}</strong>&emsp;&emsp;&emsp;"
-			f"<span style='background:#222;color:#fff;border-radius:4px;padding:2px 6px;font-size:12px'>{role}</span>"
-			f"</div>"
-    )
+			    f"<div style='background-color:#fff9e5;padding:8px;border-radius:6px;margin-bottom:8px'>"
+			    f"<strong>{r['full_name']}</strong>&emsp;&emsp;&emsp;"
+			    f"<span style='background:#222;color:#fff;border-radius:4px;padding:2px 6px;font-size:12px'>{role}</span>"
+			    f"</div>"
+		    )
 
-        box = st.container(border=True)
-		with box:
-			st.markdown(header_html, unsafe_allow_html=True)
-			col_top = st.columns([2.5, 2.5, 2.5, 0.6, 1])
-			with col_top[0]:
-				st.write(r["email"] if not is_admin else "—")
-			with col_top[1]:
-			    st.write(r["short_name"])
-            with col_top[2]:
-				st.write("********" if is_admin else r.get("password", ""))
-            with col_top[3]:
-				if is_admin:
-					st.button("Edit", key=f"edit_t_{r['short_name']}", disabled=True)
-                else:
-                    if st.button("Edit", key=f"edit_t_{r['short_name']}"):
-                        _edit_teacher_dialog(r, user.short_name)
-            with col_top[4]:
-                if is_admin:
-                    st.button("Delete", key=f"del_t_{r['short_name']}", disabled=True)
-                else:
-                    if st.button("Delete", key=f"del_t_{r['short_name']}"):
+            box = st.container(border=True)
+		    with box:
+			    st.markdown(header_html, unsafe_allow_html=True)
+			    col_top = st.columns([2.5, 2.5, 2.5, 0.6, 1])
+			    
+				with col_top[0]:
+				    st.write(r["email"] if not is_admin else "—")
+			    with col_top[1]:
+			        st.write(r["short_name"])
+                with col_top[2]:
+				    st.write("********" if is_admin else r.get("password", ""))
+                with col_top[3]:
+				    if is_admin:
+					    st.button("Edit", key=f"edit_t_{r['short_name']}", disabled=True)
+                    else:
+                        if st.button("Edit", key=f"edit_t_{r['short_name']}"):
+                            _edit_teacher_dialog(r, user.short_name)
+                with col_top[4]:
+                    if is_admin:
+                        st.button("Delete", key=f"del_t_{r['short_name']}", disabled=True)
+                    else:
+                        if st.button("Delete", key=f"del_t_{r['short_name']}"):
                         _delete_teacher_dialog(r, user.short_name)
 
 
