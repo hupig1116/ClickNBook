@@ -32,7 +32,7 @@ st.markdown(
 with st.sidebar:
     choice = option_menu(
         "",
-        options=["Rooms", "Reserve", "Manage"],
+        options=["Rooms", "Book", "View"],
         icons=["house", "calendar-plus", "gear"],
         default_index=0,
         styles=SIDEBAR_STYLES,
