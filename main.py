@@ -40,7 +40,7 @@ with st.sidebar:
 
 if choice == "Rooms":
     rooms.app()
-elif choice == "Reserve":
+elif choice == "Booking":
     reserve.app()
-elif choice == "Manage":
+elif choice == "View":
     manage.app()
