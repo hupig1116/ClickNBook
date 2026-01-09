@@ -1,25 +1,27 @@
-
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, date, time
 from typing import List, Optional, Tuple
+import threading
 
-DB_PATH = "data.db"
+db_lock = threading.Lock()
+conn = sqlite3.connect("data.db", check_same_thread=False)
+c = conn.cursor()
 
 @dataclass
 class Teacher:
     short_name: str
     full_name: str
-    email: str = None
+    email: str 
 
 @dataclass
 class Room:
     id: int
     name: str
-    capacity: Optional[int] = None
-    description: Optional[str] = None
-    img_url: Optional[str] = None
-    equipment: Optional[str] = None
+    capacity: int
+    description: str 
+    img_url: str
+    equipment: str
 
 @dataclass
 class Booking:
@@ -31,56 +33,21 @@ class Booking:
     end_time: time
     visitor_name: str
     visitor_email: str
-    short_name: str
+    short_name: Optional[str]
     purpose: Optional[str]
-
     created_at: datetime
 
-def _get_conn() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
-
-def _run(query: str, params: tuple = (), fetchone: bool = False, fetchall: bool = False, commit: bool = False):
-    with _get_conn() as conn:
-        cur = conn.cursor()
-        cur.execute(query, params)
-        result = None
-        if fetchone:
-            result = cur.fetchone()
-        elif fetchall:
-            result = cur.fetchall()
-        if commit:
-            conn.commit()
-        return result
-
-def _column_exists(table: str, column: str) -> bool:
-    rows = _run(f"PRAGMA table_info({table})", fetchall=True) or []
-    return any(row["name"] == column for row in rows)
-
-def _table_exists(table: str) -> bool:
-    r = _run(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        (table,),
-        fetchone=True
-    )
-    return r is not None
-
 def _create_tables():
-    _run(
-        """
+    c.execute("""
         CREATE TABLE IF NOT EXISTS teachers (
             short_name TEXT PRIMARY KEY NOT NULL,
             full_name  TEXT NOT NULL,
             email      TEXT NOT NULL
         )
-        """,
-        commit=True,
-    )
-
-    _run(
-        """
+    """)
+    conn.commit()
+    
+    c.execute("""
         CREATE TABLE IF NOT EXISTS rooms (
             id          INTEGER PRIMARY KEY,
             name        TEXT NOT NULL,
@@ -89,12 +56,10 @@ def _create_tables():
             equipment   TEXT,
             img_url     TEXT
         )
-        """,
-        commit=True,
-    )
-
-    _run(
-        """
+    """)
+    conn.commit()
+    
+    c.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             room_id       INTEGER NOT NULL,
@@ -105,42 +70,29 @@ def _create_tables():
             visitor_name  TEXT NOT NULL,
             visitor_email TEXT NOT NULL,
             purpose       TEXT,
-            created_at    TEXT NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY (room_id)
-                REFERENCES rooms(id)
-                ON DELETE CASCADE
-                ON UPDATE CASCADE,
-            FOREIGN KEY (short_name)
-                REFERENCES teachers(short_name)
-                ON DELETE SET NULL
-                ON UPDATE CASCADE
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE,
+            FOREIGN KEY (short_name) REFERENCES teachers(short_name) ON DELETE SET NULL
         )
-        """,
-        commit=True,
-    )
-    _run(
-        """
+    """)
+    conn.commit()
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS admins (
             short_name TEXT PRIMARY KEY,
-            FOREIGN KEY (short_name) REFERENCES teachers(short_name)
-            ON DELETE CASCADE ON UPDATE CASCADE
+            FOREIGN KEY (short_name) REFERENCES teachers(short_name) ON DELETE CASCADE
         )
-        """,
-        commit=True,
-    )
-    _run(
-            """
-            CREATE TABLE IF NOT EXISTS logins (
-                short_name TEXT NOT NULL UNIQUE,
-                password   TEXT NOT NULL,
-                FOREIGN KEY (short_name)
-                    REFERENCES teachers(short_name)
-                    ON DELETE CASCADE
-                    ON UPDATE CASCADE
-            )
-            """,
-            commit=True,
+    """)
+    conn.commit()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS logins (
+            short_name TEXT NOT NULL UNIQUE,
+            password   TEXT NOT NULL,
+            FOREIGN KEY (short_name) REFERENCES teachers(short_name) ON DELETE CASCADE
         )
+    """)
+    conn.commit()
 
 def _seed_table():
     teachers = [
@@ -154,12 +106,16 @@ def _seed_table():
         ("CNY", "Chow Ngo Yin", "cny@lkpfc.edu.hk"),
         ("LHN", "Lee Hiu Nam", "lhn@lkpfc.edu.hk"),
     ]
-    for short_name, full_name, email in teachers:
-        _run(
-            "INSERT OR IGNORE INTO teachers (short_name, full_name, email) VALUES (?, ?, ?)",
-            (short_name, full_name, email),
-            commit=True,
-        )
+
+    c.execute("SELECT COUNT(*) FROM teachers")
+    (count,) = c.fetchone()
+    if count == 0:
+        for short_name, full_name, email in teachers:
+            c.execute(
+                "INSERT OR IGNORE INTO teachers (short_name, full_name, email) VALUES (?, ?, ?)",
+                (short_name, full_name, email),
+            )
+        conn.commit()
 
     logins = [
         ("PSM", "Psm8654#"),
@@ -171,16 +127,15 @@ def _seed_table():
         ("CNY", "cny8654#"),
         ("LHN", "lhn8654!"),
     ]
-    for short_name, password in logins:
-        _run(
-            """
-            INSERT INTO logins (short_name, password)
-            VALUES (?, ?)
-            ON CONFLICT(short_name) DO UPDATE SET password = excluded.password
-            """,
-            (short_name, password),
-            commit=True,
-        )
+    c.execute("SELECT COUNT(*) FROM logins")
+    (count,) = c.fetchone()
+    if count == 0:
+        for short_name, password in logins:
+            c.execute(
+                "INSERT OR IGNORE INTO logins (short_name, password) VALUES (?, ?)",
+                (short_name, password),
+            )
+        conn.commit()
 
     rooms = [
         (101, "Room 101", 30, "A well-equipped classroom, featuring advanced audiovisual technology, ergonomic seating, and an environment conducive to academic excellence.", "projector, whiteboard, Wi-Fi", "https://i.imgur.com/Pz9Lloc.jpg"),
@@ -196,13 +151,15 @@ def _seed_table():
         (903, "School Hall", 700, "A spacious, multi-purpose hall.", "projector, whiteboard, Wi-Fi", "https://i.imgur.com/m4fciYI.jpg"),
         (904, "Cover Playground", 500, "A sheltered playground offering weather protection.", "projector, whiteboard, Wi-Fi", "https://i.imgur.com/uhbOBpC.jpg"),
         ]
-    
-    for room_id, name, capacity, description, equipment, img_url in rooms:
-            _run(
+    c.execute("SELECT COUNT(*) FROM rooms")
+    (count,) = c.fetchone()
+    if count == 0:
+        for room_id, name, capacity, description, equipment, img_url in rooms:
+            c.execute(
                 "INSERT OR IGNORE INTO rooms (id, name, capacity, description, equipment, img_url) VALUES (?, ?, ?, ?, ?, ?)",
                 (room_id, name, capacity, description, equipment, img_url),
-                commit=True,
-        )
+            )
+        conn.commit()
 
 def _init_db():
     _create_tables()
@@ -210,51 +167,32 @@ def _init_db():
 
 _init_db()
 
-###SQL login###
 def verify_login(short_name: str, password: str) -> Optional[Teacher]:
     short = short_name.strip()
-    login = _run(
-        "SELECT password FROM logins WHERE LOWER(short_name) = LOWER(?)",
-        (short,),
-        fetchone=True,
-    )
-    if not login:
+    c.execute("SELECT password FROM logins WHERE LOWER(short_name) = LOWER(?)", (short,))
+    login = c.fetchone()
+    if not login or password != login[0]:
         return None
-    if password != login["password"]:
-        return None
-    t = _run(
-        "SELECT * FROM teachers WHERE LOWER(short_name) = LOWER(?)",
-        (short,),
-        fetchone=True,
-    )
+    c.execute("SELECT * FROM teachers WHERE LOWER(short_name) = LOWER(?)", (short,))
+    t = c.fetchone()
     if not t:
         return None
-    return Teacher(short_name=t["short_name"], full_name=t["full_name"], email=t["email"])
-
-### Booking and Room functions ###
+    return Teacher(*t)
 
 def all_login_info() -> List[dict]:
-    rows = _run("SELECT * FROM logins", fetchall=True) or []
-    return [{"short_name": r["short_name"], "password": r["password"]} for r in rows]
+    c.execute("SELECT * FROM logins")
+    rows = c.fetchall()
+    return [{"short_name": r[0], "password": r[1]} for r in rows]
 
-def get_all_rooms() -> List[Room]:
-    rows = _run("SELECT * FROM rooms ORDER BY id", fetchall=True) or []
-    return [
-        Room(
-            id=r["id"],
-            name=r["name"],
-            capacity=r["capacity"],
-            description=r["description"],
-            equipment=r["equipment"],
-            img_url=r["img_url"],
-        )
-        for r in rows
-    ]
+def get_all_rooms():
+    c.execute("SELECT * FROM rooms ORDER BY id")
+    rows = c.fetchall()
+    return [Room(row[0], row[1], row[2], row[3], row[5], row[4]) for row in rows]
 
 def get_bookings(room_id: Optional[int] = None, booking_date_filter: Optional[date] = None) -> List[Booking]:
     q = "SELECT b.*, r.name AS room_name FROM bookings b JOIN rooms r ON r.id = b.room_id"
     clauses = []
-    params: tuple = ()
+    params = ()
     if room_id is not None:
         clauses.append("b.room_id = ?")
         params += (room_id,)
@@ -264,15 +202,47 @@ def get_bookings(room_id: Optional[int] = None, booking_date_filter: Optional[da
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY b.booking_date, b.start_time"
-    rows = _run(q, params, fetchall=True) or []
+    c.execute(q, params)
+    rows = c.fetchall()
     return [_booking_from_row(r) for r in rows]
 
-def delete_booking() -> None:
-    _run("DELETE FROM bookings", (), commit=True)
+def _booking_from_row(r: Tuple) -> Booking:
+    def parse_time(t: str):
+        if not t: return None
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                return datetime.strptime(t, fmt).time()
+            except ValueError:
+                pass
+        return None
 
-def count_bookings() -> int:
-    r = _run("SELECT COUNT(*) AS cnt FROM bookings", fetchone=True)
-    return r["cnt"] if r else 0
+    def parse_date(d: str):
+        if not d: return None
+        try:
+            return datetime.strptime(d, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
+    def parse_created_at(s: str):
+        if not s: return None
+        try:
+            return datetime.fromisoformat(s)
+        except:
+            return datetime.now()
+
+    return Booking(
+        id=r[0] if len(r) > 0 else 0,
+        room_id=r[1] if len(r) > 1 else 0,
+        room_name=r[10] if len(r) > 10 else "Unknown",  # r.name is 11th column (index 10)
+        booking_date=parse_date(r[3] if len(r) > 3 else None),
+        start_time=parse_time(r[4] if len(r) > 4 else None),
+        end_time=parse_time(r[5] if len(r) > 5 else None),
+        visitor_name=r[6] if len(r) > 6 else "",
+        visitor_email=r[7] if len(r) > 7 else "",
+        short_name=r[2] if len(r) > 2 else None,
+        purpose=r[8] if len(r) > 8 else None,
+        created_at=parse_created_at(r[9] if len(r) > 9 else None),
+    )
 
 def create_booking(
     room_id: int,
@@ -281,75 +251,113 @@ def create_booking(
     booking_date: date,
     start_time: time,
     end_time: time,
-    purpose: Optional[str],
-    short_name: Optional[str],
+    purpose: Optional[str] = None,
+    short_name: Optional[str] = None,
 ) -> bool:
-    _run(
-        """
+    c.execute("""
         INSERT INTO bookings
         (room_id, booking_date, start_time, end_time,
-         visitor_name, visitor_email, purpose, created_at, short_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         visitor_name, visitor_email, purpose, short_name)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        room_id,
+        booking_date.isoformat(),
+        start_time.strftime("%H:%M"),
+        end_time.strftime("%H:%M"),
+        visitor_name.strip(),
+        visitor_email.strip().lower(),
+        purpose,
+        short_name,
+    ))
+    conn.commit()
+    return True
+
+def delete_booking_by_id(booking_id: int) -> bool:
+    c.execute("DELETE FROM bookings WHERE id = ?", (booking_id,))
+    conn.commit()
+    return True
+
+def count_bookings() -> int:
+    c.execute("SELECT COUNT(*) FROM bookings")
+    (count,) = c.fetchone()
+    return count
+
+def is_available(room_id: int, booking_date: date, start_time: time, end_time: time) -> bool:
+    c.execute("""
+        SELECT 1 FROM bookings 
+        WHERE room_id = ? AND booking_date = ? 
+        AND NOT (end_time <= ? OR start_time >= ?)
+    """, (
+        room_id,
+        booking_date.isoformat(),
+        start_time.strftime("%H:%M:%S"),
+        end_time.strftime("%H:%M:%S"),
+    ))
+    row = c.fetchone()
+    return row is None
+
+
+def update_booking(
+    booking_id: int,
+    room_id: int,
+    visitor_name: str,
+    visitor_email: str,
+    booking_date: date,
+    start_time: time,
+    end_time: time,
+    purpose: Optional[str],
+    short_name: str) -> bool:
+    c.execute(
+        """
+        UPDATE bookings
+        SET room_id = ?, booking_date = ?, start_time = ?, end_time = ?,
+            visitor_name = ?, visitor_email = ?, purpose = ?, short_name = ?
+        WHERE id = ?
         """,
-            (
+        (
             room_id,
             booking_date.isoformat(),
             start_time.strftime("%H:%M:%S"),
             end_time.strftime("%H:%M:%S"),
             visitor_name.strip(),
             visitor_email.strip().lower(),
-            (purpose or None),
-            datetime.now().isoformat(timespec="seconds"),
-                (short_name.strip().upper() if short_name else None),
-        ),
-        commit=True,
+            purpose,
+            short_name.strip().upper(),
+            booking_id,
+        )
     )
+    conn.commit()
     return True
 
-def _booking_from_row(r: sqlite3.Row) -> Booking:
-    keys = set(r.keys())
+def delete_booking() -> bool:
+    c.execute("DELETE FROM bookings")
+    conn.commit()
+    return True
 
-    def get(key, default=None):
-        return r[key] if key in keys else default
+def delete_booking_by_id(booking_id: int) -> bool:
+    c.execute("DELETE FROM bookings WHERE id = ?", (booking_id,))
+    conn.commit()
+    return True
 
-    def parse_time(t: str | None):
-        if not t:
-            return None
-        for fmt in ("%H:%M:%S", "%H:%M"):
-            try:
-                return datetime.strptime(t, fmt).time()
-            except ValueError:
-                pass
-        raise ValueError(f"Invalid time format: {t}")
-
-    def parse_date(d: str | None):
-        if not d:
-            return None
-        return datetime.strptime(d, "%Y-%m-%d").date()
-
-    def parse_created_at(s: str | None):
-        if not s:
-            return None
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
-            try:
-                return datetime.strptime(s, fmt)
-            except ValueError:
-                pass
-        return datetime.fromisoformat(s)
-
-    return Booking(
-        id=get("id"),
-        room_id=get("room_id"),
-        room_name=get("room_name"),
-        booking_date=parse_date(get("booking_date")),
-        start_time=parse_time(get("start_time")),
-        end_time=parse_time(get("end_time")),
-        visitor_name=get("visitor_name"),
-        visitor_email=get("visitor_email"),
-        purpose=get("purpose"),
-        short_name=get("short_name"),
-        created_at=parse_created_at(get("created_at")),
+def is_available_excluding(
+    booking_id: int,
+    room_id: int,
+    booking_date: date,
+    start_time: time,
+    end_time: time,
+) -> bool:
+    c.execute(
+        "SELECT 1 FROM bookings WHERE room_id = ? AND booking_date = ? AND id != ? AND NOT (end_time <= ? OR start_time >= ?)",
+        (
+            room_id,
+            booking_date.isoformat(),
+            booking_id,
+            start_time.strftime("%H:%M:%S"),
+            end_time.strftime("%H:%M:%S"),
+        )
     )
+    row = c.fetchone()
+    return row is None
 
 def query_bookings(
     room_id: Optional[int] = None,
@@ -361,14 +369,11 @@ def query_bookings(
     time_to: Optional[time] = None,
     reserver: Optional[str] = None,
     purpose: Optional[str] = None,
-    short_name: Optional[str] = None) -> List[Booking]:
-    q = (
-        "SELECT b.*, r.name AS room_name "
-        "FROM bookings b JOIN rooms r ON r.id = b.room_id"
-    )
-
-    clauses: List[str] = []
-    params: Tuple = ()
+    short_name: Optional[str] = None
+) -> List[Booking]:
+    q = "SELECT b.*, r.name AS room_name FROM bookings b JOIN rooms r ON r.id = b.room_id"
+    clauses = []
+    params = ()
 
     if room_id is not None:
         clauses.append("b.room_id = ?")
@@ -389,10 +394,10 @@ def query_bookings(
         clauses.append("NOT (b.end_time <= ? OR b.start_time >= ?)")
         params += (time_from.strftime("%H:%M:%S"), time_to.strftime("%H:%M:%S"))
     elif time_from:
-        clauses.append("b.end_time > ?")
+        clauses.append("b.end_time >= ?")
         params += (time_from.strftime("%H:%M:%S"),)
     elif time_to:
-        clauses.append("b.start_time < ?")
+        clauses.append("b.start_time <= ?")
         params += (time_to.strftime("%H:%M:%S"),)
 
     if reserver:
@@ -401,177 +406,91 @@ def query_bookings(
     if purpose:
         clauses.append("LOWER(b.purpose) LIKE ?")
         params += (f"%{purpose.strip().lower()}%",)
-
     if short_name:
         clauses.append("UPPER(b.short_name) LIKE ?")
         params += (f"%{short_name.strip().upper()}%",)
-
 
     if clauses:
         q += " WHERE " + " AND ".join(clauses)
     q += " ORDER BY b.booking_date, b.start_time"
 
-    rows = _run(q, params, fetchall=True) or []
+    c.execute(q, params)
+    rows = c.fetchall()
     return [_booking_from_row(r) for r in rows]
 
-def is_available(room_id: int, booking_date: date, start_time: time, end_time: time) -> bool:
-    q = (
-        "SELECT 1 FROM bookings "
-        "WHERE room_id = ? AND booking_date = ? "
-        "AND NOT (end_time <= ? OR start_time >= ?)"
-    )
-    params = (
-        room_id,
-        booking_date.isoformat(),
-        start_time.strftime("%H:%M:%S"),
-        end_time.strftime("%H:%M:%S"),
-    )
-    row = _run(q, params, fetchone=True)
-    return row is None
-
-def update_booking(
-    booking_id: int,
-    room_id: int,
-    visitor_name: str,
-    visitor_email: str,
-    booking_date: date,
-    start_time: time,
-    end_time: time,
-    purpose: Optional[str],
-    short_name: str) -> bool:
-    _run(
-        """
-        UPDATE bookings
-        SET room_id = ?, booking_date = ?, start_time = ?, end_time = ?,
-            visitor_name = ?, visitor_email = ?, purpose = ?, short_name = ?
-        WHERE id = ?
-        """,
-        (
-            room_id,
-            booking_date.isoformat(),
-            start_time.strftime("%H:%M:%S"),
-            end_time.strftime("%H:%M:%S"),
-            visitor_name.strip(),
-            visitor_email.strip().lower(),
-            purpose.strip(),
-            short_name.strip().upper(),
-            booking_id,
-        ),
-        commit=True,
-    )
-    return True
-
-def delete_booking_by_id(booking_id: int) -> bool:
-    _run("DELETE FROM bookings WHERE id = ?", (booking_id,), commit=True)
-    return True
-
-def is_available_excluding(
-    booking_id: int,
-    room_id: int,
-    booking_date: date,
-    start_time: time,
-    end_time: time,
-) -> bool:
-    q = (
-        "SELECT 1 FROM bookings "
-        "WHERE room_id = ? AND booking_date = ? AND id != ? "
-        "AND NOT (end_time <= ? OR start_time >= ?)"
-    )
-    params = (
-        room_id,
-        booking_date.isoformat(),
-        booking_id,
-        start_time.strftime("%H:%M:%S"),
-        end_time.strftime("%H:%M:%S"),
-    )
-    row = _run(q, params, fetchone=True)
-    return row is None
-
-
-### Admin role functions ###
 def get_admins() -> List[str]:
-    rows = _run("SELECT short_name FROM admins", fetchall=True) or []
-    return [r["short_name"] for r in rows]
+    c.execute("SELECT short_name FROM admins")
+    rows = c.fetchall()
+    return [row[0] for row in rows]
 
 def add_admin(short_name: str) -> bool:
-    _run("INSERT OR IGNORE INTO admins (short_name) VALUES (?)", (short_name,), commit=True)
+    c.execute("INSERT OR IGNORE INTO admins (short_name) VALUES (?)", (short_name,))
+    conn.commit()
     return True
 
 def remove_admin(short_name: str) -> bool:
-    _run("DELETE FROM admins WHERE short_name = ?", (short_name,), commit=True)
+    c.execute("DELETE FROM admins WHERE short_name = ?", (short_name,))
+    conn.commit()
     return True
 
 def is_admin_check(short_name: str) -> bool:
-    r = _run("SELECT 1 FROM admins WHERE short_name = ?", (short_name,), fetchone=True)
+    c.execute("SELECT 1 FROM admins WHERE short_name = ?", (short_name,))
+    r = c.fetchone()
     return r is not None
 
 def get_admins_info() -> List[str]:
-    rows = _run("SELECT full_name,email FROM teachers t,admins a WHERE t.short_name = a.short_name", fetchall=True) or []
-    return [f'<b>{r["full_name"]}</b> - {r["email"]}' for r in rows]
+    c.execute("SELECT full_name, email FROM teachers t, admins a WHERE t.short_name = a.short_name")
+    rows = c.fetchall()
+    return [f'<b>{row[0]}</b> - {row[1]}' for row in rows]
 
-### Teacher management functions ###
 def list_teachers() -> List[Teacher]:
-    rows = _run(
-    """
-    SELECT t.short_name, t.full_name, t.email
-    FROM teachers t
-    LEFT JOIN admins a ON t.short_name = a.short_name
-    ORDER BY a.short_name IS NOT NULL DESC, t.short_name ASC;
-    """, fetchall=True) or []
-    return [Teacher(short_name=r["short_name"], full_name=r["full_name"], email=r["email"]) for r in rows]
+    c.execute("""
+        SELECT t.short_name, t.full_name, t.email
+        FROM teachers t
+        LEFT JOIN admins a ON t.short_name = a.short_name
+        ORDER BY a.short_name IS NOT NULL DESC, t.short_name ASC
+    """)
+    rows = c.fetchall()
+    return [Teacher(*row) for row in rows]
 
 def list_teachers_with_passwords() -> List[dict]:
-    teachers = list_teachers() or []
-    logins = all_login_info() or []
-    pw_map = {r["short_name"]: r["password"] for r in logins}
+    teachers = list_teachers()
+    c.execute("SELECT * FROM logins")
+    logins = c.fetchall()
+    pw_map = {row[0]: row[1] for row in logins}
     return [{"short_name": t.short_name, "full_name": t.full_name, "email": t.email, "password": pw_map.get(t.short_name)} for t in teachers]
 
 def list_teacher_short_name(short_name: str) -> bool:
-    r = _run("SELECT 1 FROM teachers WHERE short_name = ?", (short_name,), fetchone=True)
+    c.execute("SELECT 1 FROM teachers WHERE short_name = ?", (short_name,))
+    r = c.fetchone()
     return r is not None
 
 def create_teacher(short_name: str, full_name: str, email: str, password: str) -> bool:
-    _run(
-        "INSERT INTO teachers (short_name, full_name, email) VALUES (?, ?, ?)",(short_name, full_name, email),commit=True,
+    c.execute("INSERT INTO teachers (short_name, full_name, email) VALUES (?, ?, ?)", (short_name, full_name, email))
+    c.execute(
+        "INSERT INTO logins (short_name, password) VALUES (?, ?) ON CONFLICT(short_name) DO UPDATE SET password = excluded.password",
+        (short_name, password)
     )
-    _run(
-        """
-        INSERT INTO logins (short_name, password)
-        VALUES (?, ?)
-        ON CONFLICT(short_name) DO UPDATE SET password = excluded.password
-        """,
-        (short_name, password),
-        commit=True,
-    )
+    conn.commit()
     return True
 
 def update_teacher(short_name: str, full_name: str, email: str, password: Optional[str] = None) -> bool:
-    _run(
-        "UPDATE teachers SET full_name = ?, email = ? WHERE short_name = ?",
-        (full_name, email, short_name),
-        commit=True,
-    )
+    c.execute("UPDATE teachers SET full_name = ?, email = ? WHERE short_name = ?", (full_name, email, short_name))
     if password and password.strip():
-        _run(
-            "UPDATE logins SET password = ? WHERE short_name = ?",
-            (password.strip(), short_name),
-            commit=True,
-        )
+        c.execute("UPDATE logins SET password = ? WHERE short_name = ?", (password.strip(), short_name))
+    conn.commit()
     return True
 
 def rename_teacher(old_short_name: str, new_short_name: str) -> bool:
-    r = _run("SELECT 1 FROM teachers WHERE short_name = ?", (new_short_name,), fetchone=True)
+    c.execute("SELECT 1 FROM teachers WHERE short_name = ?", (new_short_name,))
+    r = c.fetchone()
     if r:
         return False
-    _run(
-        "UPDATE teachers SET short_name = ? WHERE short_name = ?",
-        (new_short_name, old_short_name),
-        commit=True,
-    )
+    c.execute("UPDATE teachers SET short_name = ? WHERE short_name = ?", (new_short_name, old_short_name))
+    conn.commit()
     return True
 
 def delete_teacher(short_name: str) -> bool:
-    _run("DELETE FROM teachers WHERE short_name = ?", (short_name,), commit=True)
+    c.execute("DELETE FROM teachers WHERE short_name = ?", (short_name,))
+    conn.commit()
     return True
-
-
