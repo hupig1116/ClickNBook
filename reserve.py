@@ -294,6 +294,7 @@ def _admin_bookings_filters():
             st.session_state["key_time_mode"] = "All times"
             st.session_state["key_reserver"] = ""
             st.session_state["key_purpose"] = ""
+            st.session_state["key_owner"] = "All"
 
         col_btn1, col_btn2 = st.columns([6, 5])
         with col_btn1:
@@ -377,65 +378,34 @@ def _admin_bookings_filters():
             key="key_purpose",
         )
 
-    sel_room = st.session_state.get("key_selected_room")
-    room_id = sel_room if sel_room != 0 else None
+    filters = {
+        'room_id': st.session_state.get("key_selected_room") if st.session_state.get("key_selected_room") != 0 else None,
+        'date_mode': st.session_state.get("key_date_mode", "All Dates"),
+        'date': st.session_state.get("key_date"),
+        'month': months.index(st.session_state.get("key_month", "All")) if st.session_state.get("key_date_mode") == "Specific Month/Year" and st.session_state.get("key_month") != "All" else None,
+        'year': int(st.session_state.get("key_year", "All")) if st.session_state.get("key_date_mode") == "Specific Month/Year" and st.session_state.get("key_year") != "All" else None,
+        'time_from': st.session_state.get("key_time_from"),
+        'time_to': st.session_state.get("key_time_to"),
+        'owner': st.session_state.get("key_owner"),
+        'reserver': st.session_state.get("key_reserver"),
+        'purpose': st.session_state.get("key_purpose"),
+    }
 
-    sel_date_scope = st.session_state.get("key_date_mode")
-    date_of_booked = None
-    month_int = None
-    year_int = None
-    sel_month = st.session_state.get("key_month")
-    sel_year = st.session_state.get("key_year")
-    if sel_date_scope == "Specific Date":
-        date_of_booked = st.session_state.get("key_date", date.today())
-    elif sel_date_scope == "Specific Month/Year":
-        if sel_month != "All":
-            month_int = months.index(sel_month)
-        if sel_year != "All":
-            year_int = int(sel_year)
+    query_params = {
+        'room_id': filters['room_id'] if filters['room_id'] != 0 else None,
+        'date_mode': filters['date_mode'],
+        'booking_date': filters['date'],
+        'month': filters['month'],
+        'year': filters['year'],
+        'time_from': filters['time_from'],
+        'time_to': filters['time_to'],
+        'reserver': filters['reserver'] or None,
+        'purpose': filters['purpose'] or None,
+        'short_name': filters['owner'] if filters['owner'] and filters['owner'] != "All" else None,
+    }
 
-    sel_time_scope = st.session_state.get("key_time_mode")
-    if sel_time_scope == "Specific time range":
-        time_from = st.session_state.get("key_time_from")
-        time_to = st.session_state.get("key_time_to")
-    else:
-        time_from = None
-        time_to = None
-    sel_owner = st.session_state.get("key_owner")
-    sel_reserver = st.session_state.get("key_reserver") or ""
-    sel_purpose = st.session_state.get("key_purpose") or ""
+    filtered = db.query_bookings(**query_params)
 
-    owner_param = None if (not sel_owner or sel_owner == "All") else sel_owner
-    reserver_param = None if not sel_reserver.strip() else sel_reserver.strip()
-    purpose_param = None if not sel_purpose.strip() else sel_purpose.strip()
-
-    no_filters = (
-        room_id is None
-        and sel_date_scope == "All Dates"
-        and month_int is None
-        and year_int is None
-        and time_from is None
-        and time_to is None
-        and (reserver_param is None)
-        and (purpose_param is None)
-        and (owner_param is None)
-    )
-
-    if no_filters:
-        filtered = db.get_bookings()
-    else:
-        filtered = db.query_bookings(
-            room_id=room_id,
-            date_mode=sel_date_scope,
-            booking_date=date_of_booked,
-            month=month_int,
-            year=year_int,
-            time_from=time_from,
-            time_to=time_to,
-            reserver=reserver_param,
-            purpose=purpose_param,
-            short_name=owner_param,
-            )
 
     page_size = st.session_state.get("key_page_size", 10)
     page_index = st.session_state.get("key_page_index", 0)
