@@ -695,6 +695,8 @@ def app():
     st.markdown("<h1 style='text-align: center;'>Reserve</h1>", unsafe_allow_html=True)
     st.markdown("<h6 style='text-align: center;'>Find a room that fits your needs.</h6>", unsafe_allow_html=True)
 
+    if "user" not in st.session_state:
+        st.session_state.user = None
     user = st.session_state.user
 
     if user is None:
